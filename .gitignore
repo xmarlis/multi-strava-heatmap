@@ -1,0 +1,21 @@
+# Environment & credentials
+.env
+*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Maps & outputs
+combined_routes_*.html
+combined_heatmap_*.html
+location_maps_*/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
