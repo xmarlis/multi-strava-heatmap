@@ -274,14 +274,20 @@ def get_continent_from_country(country):
         "Sweden": "Europe", "Norway": "Europe", "Denmark": "Europe", "Finland": "Europe",
         "Ireland": "Europe", "Croatia": "Europe", "Slovenia": "Europe", "Hungary": "Europe",
         "Romania": "Europe", "Bulgaria": "Europe", "Serbia": "Europe", "Slovakia": "Europe",
+        "Iceland": "Europe",
         
-        # North America
+        # North America (includes Central America)
         "United States": "North America", "United States of America": "North America",
         "Canada": "North America", "Mexico": "North America",
+        "El Salvador": "North America", "Costa Rica": "North America", 
+        "Panama": "North America", "Guatemala": "North America", "Honduras": "North America",
+        "Nicaragua": "North America", "Belize": "North America",
         
         # South America
         "Brazil": "South America", "Argentina": "South America", "Chile": "South America",
         "Peru": "South America", "Colombia": "South America", "Venezuela": "South America",
+        "Ecuador": "South America", "Bolivia": "South America", "Paraguay": "South America",
+        "Uruguay": "South America", "Guyana": "South America", "Suriname": "South America",
         
         # Asia
         "China": "Asia", "Japan": "Asia", "India": "Asia", "Thailand": "Asia",
@@ -747,10 +753,19 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
         location_key = get_location_key(activity, geocode_cache)
         account_name = activity.get("_account", "Unknown")
         
-        # Extract country from location_key
+        # Extract country from location_key - FIXED VERSION
+        country = None
         if ", " in location_key:
+            # "City, Country" format
             parts = location_key.split(", ")
             country = parts[-1]
+        else:
+            # Check if the entire location_key is itself a country
+            test_continent = get_continent_from_country(location_key)
+            if test_continent != "Unknown":
+                country = location_key
+        
+        if country:
             countries_visited.add(country)
             continent = get_continent_from_country(country)
             if continent != "Unknown":
@@ -984,6 +999,8 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
     
     print(f"\n✅ Combined Heatmap: {output_file}")
     print(f"   📊 {len(location_data)} Locations")
+    print(f"   🌍 {len(continents_visited)} Continents")
+    print(f"   🗺️  {len(countries_visited)} Countries")
     print(f"   🔗 {len(location_map_files)} klickbare Location-Maps")
     
     return output_file
