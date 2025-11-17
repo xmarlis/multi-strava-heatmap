@@ -369,6 +369,9 @@ def get_account_color(account_name, account_colors):
     if lower == "a":
         account_colors[account_name] = "#10b981"  # green
         return account_colors[account_name]
+    if lower == "o":
+        account_colors[account_name] = "#f97316"  # orange  ← NEU für "o"
+        return account_colors[account_name]
 
     # Default behavior for any other account
     if account_name not in account_colors:
@@ -1043,7 +1046,7 @@ def main():
         print("-" * 40)
         
         account_name = input(
-            "Enter a name for this account (e.g., 'm', 'a'): "
+            "Enter a name for this account (e.g., 'm', 'a', 'o'): "
         ).strip()
         if not account_name:
             account_name = f"Account{i+1}"
