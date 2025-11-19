@@ -1,19 +1,19 @@
 """
 Multi-Account Strava Routes + Heatmap Generator
 ------------------------------------------------
-Kombiniert Aktivitäten aus MEHREREN Strava-Accounts in gemeinsamen Karten.
-Perfekt für Paare, Freunde oder Laufgruppen.
+Combines activities from MULTIPLE Strava accounts into shared maps.
+Perfect for couples, friends, or running groups.
 
-Erzeugt:
-1. Combined Routes Map  – alle Routen aller Accounts
-2. Combined Heatmap     – Kreise nach Workout-Häufigkeit
-3. Location Maps        – Detailkarten für jede Region
+Generates:
+1. Combined Routes Map  – all routes from all accounts
+2. Combined Heatmap     – circles based on workout frequency
+3. Location Maps        – detail maps for each region
 
-Konfiguration (.env):
-- STRAVA_CLIENT_ID_1 / STRAVA_CLIENT_SECRET_1  -> App für Account 1
-- STRAVA_CLIENT_ID_2 / STRAVA_CLIENT_SECRET_2  -> App für Account 2
+Configuration (.env):
+- STRAVA_CLIENT_ID_1 / STRAVA_CLIENT_SECRET_1  -> App for Account 1
+- STRAVA_CLIENT_ID_2 / STRAVA_CLIENT_SECRET_2  -> App for Account 2
 - ...
-- Optional: FROM_DATE / TO_DATE (YYYY-MM-DD) für Datumsfilter
+- Optional: FROM_DATE / TO_DATE (YYYY-MM-DD) for date filter
 """
 
 import os
@@ -32,6 +32,10 @@ import time
 import re
 import signal
 import sys
+
+
+# Which activity types should be on the maps?
+ALLOWED_TYPES = ["run", "walk", "ride", "hike"]
 
 
 # ---------- OAuth Callback Handler ----------
@@ -60,14 +64,14 @@ class OAuthHandler(BaseHTTPRequestHandler):
             )
     
     def log_message(self, format, *args):
-        # keine hässlichen HTTP-Logs
+        # no ugly HTTP logs
         pass
 
 
-# ---------- Helper für Datums-Filter ----------
+# ---------- Helper for date filter ----------
 
 def parse_date_env(name):
-    """Liest FROM_DATE / TO_DATE aus .env (YYYY-MM-DD) und gibt Unix-Timestamp zurück."""
+    """Reads FROM_DATE / TO_DATE from .env (YYYY-MM-DD) and returns Unix timestamp."""
     val = os.getenv(name)
     if not val:
         return None
@@ -75,19 +79,19 @@ def parse_date_env(name):
         dt = datetime.strptime(val.strip(), "%Y-%m-%d")
         return int(dt.timestamp())
     except ValueError:
-        print(f"⚠️  Ungültiges Datumsformat in {name} (erwartet YYYY-MM-DD)")
+        print(f"⚠️  Invalid date format in {name} (expected YYYY-MM-DD)")
         return None
 
 
-# ---------- Token-Handling ----------
+# ---------- Token handling ----------
 
 def refresh_strava_token(client_id, client_secret, token_file, token_data):
-    """Refresh eines abgelaufenen Access Tokens."""
+    """Refresh an expired Access Token."""
     refresh_token = token_data.get("refresh_token")
     if not refresh_token:
         return None
 
-    print("🔄 Access token abgelaufen, versuche Refresh...")
+    print("🔄 Access token expired, attempting refresh...")
     url = "https://www.strava.com/oauth/token"
     payload = {
         "client_id": client_id,
@@ -97,7 +101,7 @@ def refresh_strava_token(client_id, client_secret, token_file, token_data):
     }
     response = requests.post(url, data=payload)
     if response.status_code != 200:
-        print(f"❌ Token-Refresh fehlgeschlagen: {response.text}")
+        print(f"❌ Token refresh failed: {response.text}")
         return None
 
     new_data = response.json()
@@ -106,7 +110,7 @@ def refresh_strava_token(client_id, client_secret, token_file, token_data):
 
     athlete = new_data.get("athlete", {})
     print(
-        f"   ✅ Token refreshed für "
+        f"   ✅ Token refreshed for "
         f"{athlete.get('firstname', '?')} {athlete.get('lastname', '?')} "
         f"(id={athlete.get('id')})"
     )
@@ -114,11 +118,11 @@ def refresh_strava_token(client_id, client_secret, token_file, token_data):
 
 
 def authenticate_strava(client_id, client_secret, account_name):
-    """OAuth-Flow + ggf. Token-Refresh für einen Account."""
+    """OAuth flow + token refresh if needed for an account."""
     
     token_file = f"strava_token_{account_name}.json"
 
-    # 1) vorhandenen Token wiederverwenden / refreshen
+    # 1) reuse existing token / refresh
     if os.path.exists(token_file):
         with open(token_file, "r") as f:
             token_data = json.load(f)
@@ -129,7 +133,7 @@ def authenticate_strava(client_id, client_secret, account_name):
         if expires_at and access_token and expires_at > time.time():
             athlete = token_data.get("athlete", {})
             print(
-                f"🔑 Reuse Token für "
+                f"🔑 Reusing token for "
                 f"{athlete.get('firstname', '?')} {athlete.get('lastname', '?')} "
                 f"(id={athlete.get('id')})"
             )
@@ -141,9 +145,9 @@ def authenticate_strava(client_id, client_secret, account_name):
         if refreshed:
             return refreshed
         else:
-            print("⚠️  Refresh fehlgeschlagen, starte vollständigen OAuth-Flow...")
+            print("⚠️  Refresh failed, starting full OAuth flow...")
 
-    # 2) vollständiger OAuth-Flow (nur beim ersten Mal pro Account)
+    # 2) full OAuth flow (only first time per account)
     redirect_uri = "http://localhost:8000/callback"
     auth_url = (
         "https://www.strava.com/oauth/authorize"
@@ -153,11 +157,11 @@ def authenticate_strava(client_id, client_secret, account_name):
         "&scope=activity:read_all"
     )
 
-    print(f"\n🔐 {account_name}: Strava-Login nötig")
-    print("   1️⃣ Im richtigen Browser mit dem gewünschten Strava-Account einloggen")
-    print("   2️⃣ Diese URL dort öffnen:")
+    print(f"\n🔐 {account_name}: Strava login required")
+    print("   1️⃣ Log in with the correct browser using the desired Strava account")
+    print("   2️⃣ Open this URL there:")
     print(f"\n   {auth_url}\n")
-    print("   (Falls sich der falsche Browser öffnet: URL einfach kopieren und im richtigen einfügen.)\n")
+    print("   (If the wrong browser opens: just copy the URL and paste it in the correct one.)\n")
 
     try:
         webbrowser.open(auth_url)
@@ -167,7 +171,7 @@ def authenticate_strava(client_id, client_secret, account_name):
     server = HTTPServer(("localhost", 8000), OAuthHandler)
     server.auth_code = None
 
-    print(f"⏳ Warte auf Freigabe von {account_name}...")
+    print(f"⏳ Waiting for authorization from {account_name}...")
 
     while server.auth_code is None:
         server.handle_request()
@@ -185,7 +189,7 @@ def authenticate_strava(client_id, client_secret, account_name):
     response = requests.post(token_url, data=payload)
 
     if response.status_code != 200:
-        print(f"❌ Token-Exchange fehlgeschlagen: {response.text}")
+        print(f"❌ Token exchange failed: {response.text}")
         return None
 
     token_data = response.json()
@@ -195,23 +199,23 @@ def authenticate_strava(client_id, client_secret, account_name):
 
     athlete = token_data.get("athlete", {})
     print(
-        f"✅ {account_name} authentifiziert als "
+        f"✅ {account_name} authenticated as "
         f"{athlete.get('firstname', '?')} {athlete.get('lastname', '?')} "
         f"(id={athlete.get('id')})"
     )
     return token_data["access_token"]
 
 
-# ---------- Aktivitäten laden ----------
+# ---------- Load activities ----------
 
 def get_all_activities(access_token, account_name):
     """
-    Holt Aktivitäten für einen Account.
-    Nutzt optional FROM_DATE / TO_DATE aus der .env.
+    Fetches activities for an account.
+    Uses optional FROM_DATE / TO_DATE from .env.
     """
     activities = []
     page = 1
-    per_page = 100  # etwas kleiner, um Rate-Limit zu schonen
+    per_page = 100  # smaller to respect rate limit
 
     from_ts = parse_date_env("FROM_DATE")
     to_ts = parse_date_env("TO_DATE")
@@ -228,19 +232,19 @@ def get_all_activities(access_token, account_name):
         response = requests.get(url, headers=headers, params=params)
 
         if response.status_code == 429:
-            print(f"❌ Rate Limit für {account_name} überschritten (429). Später nochmal versuchen.")
+            print(f"❌ Rate limit exceeded for {account_name} (429). Try again later.")
             break
 
         if response.status_code != 200:
             try:
                 data = response.json()
                 if data.get("message") == "Rate Limit Exceeded":
-                    print(f"❌ Rate Limit für {account_name} überschritten (API-Meldung).")
+                    print(f"❌ Rate limit exceeded for {account_name} (API message).")
                     break
             except Exception:
                 pass
 
-            print(f"❌ Fehler beim Laden für {account_name}: {response.text}")
+            print(f"❌ Error loading activities for {account_name}: {response.text}")
             break
 
         page_activities = response.json()
@@ -251,7 +255,7 @@ def get_all_activities(access_token, account_name):
             activity["_account"] = account_name
 
         activities.extend(page_activities)
-        print(f"📥 {len(activities)} Aktivitäten von {account_name} geladen...")
+        print(f"📥 {len(activities)} activities loaded from {account_name}...")
 
         if len(page_activities) < per_page:
             break
@@ -261,7 +265,7 @@ def get_all_activities(access_token, account_name):
     return activities
 
 
-# ---------- Geocoding / Farben ----------
+# ---------- Geocoding / Colors ----------
 
 def get_continent_from_country(country):
     """Map country to continent."""
@@ -305,7 +309,7 @@ def get_continent_from_country(country):
 
 
 def get_city_from_coordinates(lat, lng, cache={}):
-    """Reverse Geocoding via Nominatim mit einfachem Cache."""
+    """Reverse geocoding via Nominatim with simple cache."""
     cache_key = f"{round(lat, 1)},{round(lng, 1)}"
     
     if cache_key in cache:
@@ -360,7 +364,7 @@ def get_city_from_coordinates(lat, lng, cache={}):
 
 
 def get_account_color(account_name, account_colors):
-    """Fixed color per account (m = violet, a = green, others from palette)."""
+    """Fixed color per account (m = violet, a = green, o = orange)."""
     # Hard-code special colors
     lower = account_name.lower()
     if lower == "m":
@@ -370,7 +374,7 @@ def get_account_color(account_name, account_colors):
         account_colors[account_name] = "#10b981"  # green
         return account_colors[account_name]
     if lower == "o":
-        account_colors[account_name] = "#f97316"  # orange  ← NEU für "o"
+        account_colors[account_name] = "#f97316"  # orange
         return account_colors[account_name]
 
     # Default behavior for any other account
@@ -392,7 +396,7 @@ def get_account_color(account_name, account_colors):
 
 
 def get_location_key(activity, geocode_cache={}):
-    """String-Schlüssel pro Region (City, Country oder Koordinaten)."""
+    """String key per region (City, Country or coordinates)."""
     city = activity.get("location_city", "")
     country = activity.get("location_country", "")
     
@@ -420,7 +424,7 @@ def get_location_key(activity, geocode_cache={}):
 
 
 def assign_region_color(location_key):
-    """Farbe pro Region."""
+    """Color per region."""
     colors = [
         "#ef4444",
         "#f59e0b",
@@ -447,10 +451,10 @@ def assign_region_color(location_key):
     return colors[hash_val % len(colors)]
 
 
-# ---------- Kartenbau: Locations ----------
+# ---------- Map construction: Locations ----------
 
 def create_location_routes_map(location_key, activities, timestamp, folder_name, accounts):
-    """Erstellt Detailkarte für eine Region mit allen Accounts."""
+    """Creates detail map for a region with all accounts."""
     
     safe_name = re.sub(r"[^\w\s-]", "", location_key).strip().replace(" ", "_")[:50]
     
@@ -468,7 +472,7 @@ def create_location_routes_map(location_key, activities, timestamp, folder_name,
     )
     
     account_stats = defaultdict(
-        lambda: {"runs": 0, "walks": 0, "rides": 0, "total": 0}
+        lambda: {"runs": 0, "walks": 0, "rides": 0, "hikes": 0, "total": 0}
     )
     account_colors = {}
     routes_added = 0
@@ -491,6 +495,8 @@ def create_location_routes_map(location_key, activities, timestamp, folder_name,
                     account_stats[account_name]["walks"] += 1
                 elif activity_type == "ride":
                     account_stats[account_name]["rides"] += 1
+                elif activity_type == "hike":
+                    account_stats[account_name]["hikes"] += 1
                 
                 folium.PolyLine(
                     coords,
@@ -516,7 +522,7 @@ def create_location_routes_map(location_key, activities, timestamp, folder_name,
                     <span style="font-size: 13px; font-weight: 600; color: #1e293b;">{account_name}</span>
                 </div>
                 <div style="font-size: 11px; color: #64748b; margin-left: 20px;">
-                    R:{stats['runs']} W:{stats['walks']} B:{stats['rides']}
+                    R:{stats['runs']} W:{stats['walks']} B:{stats['rides']} H:{stats['hikes']}
                 </div>
             </div>
             """
@@ -554,19 +560,19 @@ def create_location_routes_map(location_key, activities, timestamp, folder_name,
     return filename
 
 
-# ---------- Kartenbau: Combined Routes ----------
+# ---------- Map construction: Combined Routes ----------
 
 def create_combined_routes_map(all_activities, timestamp, accounts):
-    """Große Routenkarte mit allen Accounts."""
+    """Large route map with all accounts."""
     
     filtered_activities = [
         a
         for a in all_activities
-        if a.get("type", "").lower() in ["run", "walk", "ride"]
+        if a.get("type", "").lower() in ALLOWED_TYPES
     ]
     
     if not filtered_activities:
-        print("❌ Keine Aktivitäten mit GPS-Daten gefunden")
+        print("❌ No activities with GPS data found")
         return None
     
     first_activity_with_location = None
@@ -576,7 +582,7 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
             break
     
     if not first_activity_with_location:
-        print("❌ Keine Aktivitäten mit GPS-Daten gefunden")
+        print("❌ No activities with GPS data found")
         return None
     
     center_lat, center_lng = first_activity_with_location["start_latlng"]
@@ -587,12 +593,12 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
     )
     
     account_stats = defaultdict(
-        lambda: {"runs": 0, "walks": 0, "rides": 0, "total": 0}
+        lambda: {"runs": 0, "walks": 0, "rides": 0, "hikes": 0, "total": 0}
     )
     account_colors = {}
     routes_added = 0
     
-    print("🗺️  Füge Routen zur Combined Map hinzu...")
+    print("🗺️  Adding routes to combined map...")
     
     for activity in filtered_activities:
         polyline_str = activity.get("map", {}).get("summary_polyline")
@@ -612,6 +618,8 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
                     account_stats[account_name]["walks"] += 1
                 elif activity_type == "ride":
                     account_stats[account_name]["rides"] += 1
+                elif activity_type == "hike":
+                    account_stats[account_name]["hikes"] += 1
                 
                 # Add data attributes for filtering
                 folium.PolyLine(
@@ -627,7 +635,7 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
                 routes_added += 1
                 
             except Exception as e:
-                print(f"⚠️  Aktivität übersprungen: {e}")
+                print(f"⚠️  Activity skipped: {e}")
     
     legend_items = ""
     for account_name in accounts:
@@ -651,6 +659,7 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
                 <div>Runs: {stats['runs']}</div>
                 <div>Walks: {stats['walks']}</div>
                 <div>Rides: {stats['rides']}</div>
+                <div>Hikes: {stats['hikes']}</div>
                 <div style="margin-top: 4px; font-weight: 600;">Total: {stats['total']}</div>
             </div>
         </div>
@@ -708,23 +717,23 @@ def create_combined_routes_map(all_activities, timestamp, accounts):
     map_obj.save(output_file)
     
     print(f"\n✅ Combined Routes Map: {output_file}")
-    print(f"   📊 {routes_added} Routen")
+    print(f"   📊 {routes_added} routes")
     for account_name in accounts:
         stats = account_stats[account_name]
-        print(f"   👤 {account_name}: {stats['total']} Aktivitäten")
+        print(f"   👤 {account_name}: {stats['total']} activities")
     
     return output_file
 
 
-# ---------- Kartenbau: Combined Heatmap ----------
+# ---------- Map construction: Combined Heatmap ----------
 
 def create_combined_heatmap(all_activities, timestamp, accounts):
-    """Heatmap mit Kreisen pro Region + Klick auf Detailkarte."""
+    """Heatmap with circles per region + click for detail map."""
     
     filtered_activities = [
         a
         for a in all_activities
-        if a.get("type", "").lower() in ["run", "walk", "ride"]
+        if a.get("type", "").lower() in ALLOWED_TYPES
     ]
     
     location_data = defaultdict(
@@ -743,11 +752,11 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
     continents_visited = set()
     countries_visited = set()
     
-    print("🌍 Verarbeite Locations (City-Namen)...")
+    print("🌍 Processing locations (city names)...")
     
     for idx, activity in enumerate(filtered_activities, 1):
         if idx % 100 == 0:
-            print(f"   {idx}/{len(filtered_activities)} Aktivitäten...")
+            print(f"   {idx}/{len(filtered_activities)} activities...")
         
         start_latlng = activity.get("start_latlng")
         if not start_latlng:
@@ -780,14 +789,14 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
         location_data[location_key]["activities"].append(activity)
         location_data[location_key]["by_account"][account_name] += 1
     
-    print("\n🗺️  Erzeuge Location-Detailkarten...")
+    print("\n🗺️  Creating location detail maps...")
     location_folder = f"location_maps_{timestamp}"
     os.makedirs(location_folder, exist_ok=True)
     
     location_map_files = {}
     for idx, (location_key, data) in enumerate(location_data.items(), 1):
         if idx % 10 == 0:
-            print(f"   {idx}/{len(location_data)} Locations...")
+            print(f"   {idx}/{len(location_data)} locations...")
         
         location_file = create_location_routes_map(
             location_key, data["activities"], timestamp, location_folder, accounts
@@ -795,7 +804,7 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
         if location_file:
             location_map_files[location_key] = location_file
     
-    print(f"   ✅ {len(location_map_files)} Location-Maps erstellt")
+    print(f"   ✅ {len(location_map_files)} location maps created")
     
     map_obj = folium.Map(
         location=[20, 0],
@@ -804,7 +813,7 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
         world_copy_jump=True,
     )
     
-    print("\n🗺️  Erzeuge Heatmap-Kreise...")
+    print("\n🗺️  Creating heatmap circles...")
     
     counts = [data["count"] for data in location_data.values()]
     min_count = min(counts) if counts else 1
@@ -873,7 +882,7 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
         circle.add_to(map_obj)
     
     account_stats = defaultdict(
-        lambda: {"runs": 0, "walks": 0, "rides": 0, "total": 0}
+        lambda: {"runs": 0, "walks": 0, "rides": 0, "hikes": 0, "total": 0}
     )
     for activity in filtered_activities:
         account_name = activity.get("_account", "Unknown")
@@ -885,6 +894,8 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
             account_stats[account_name]["walks"] += 1
         elif activity_type == "ride":
             account_stats[account_name]["rides"] += 1
+        elif activity_type == "hike":
+            account_stats[account_name]["hikes"] += 1
     
     # Create continents/countries display
     continents_list = sorted(list(continents_visited)) if continents_visited else ["None yet"]
@@ -932,6 +943,9 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
                 </div>
                 <div style="font-size: 13px; color: #64748b;">
                     Rides: <strong>{stats['rides']}</strong>
+                </div>
+                <div style="font-size: 13px; color: #64748b;">
+                    Hikes: <strong>{stats['hikes']}</strong>
                 </div>
                 <div style="font-size: 14px; color: #1e293b; margin-top: 4px;">
                     Total: <strong>{stats['total']}</strong>
@@ -1001,10 +1015,10 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
     map_obj.save(output_file)
     
     print(f"\n✅ Combined Heatmap: {output_file}")
-    print(f"   📊 {len(location_data)} Locations")
-    print(f"   🌍 {len(continents_visited)} Continents")
-    print(f"   🗺️  {len(countries_visited)} Countries")
-    print(f"   🔗 {len(location_map_files)} klickbare Location-Maps")
+    print(f"   📊 {len(location_data)} locations")
+    print(f"   🌍 {len(continents_visited)} continents")
+    print(f"   🗺️  {len(countries_visited)} countries")
+    print(f"   🔗 {len(location_map_files)} clickable location maps")
     
     return output_file
 
@@ -1012,10 +1026,10 @@ def create_combined_heatmap(all_activities, timestamp, accounts):
 # ---------- main() ----------
 
 def main():
-    """Hauptfunktion."""
+    """Main function."""
     
     def signal_handler(sig, frame):
-        print("\n\n⚠️  Script abgebrochen.")
+        print("\n\n⚠️  Script aborted.")
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
@@ -1034,15 +1048,15 @@ def main():
             )
             if 1 <= num_accounts <= 5:
                 break
-            print("⚠️  Bitte Zahl zwischen 1 und 5 eingeben")
+            print("⚠️  Please enter a number between 1 and 5")
         except ValueError:
-            print("⚠️  Bitte eine gültige Zahl eingeben")
+            print("⚠️  Please enter a valid number")
     
     accounts = []
     account_credentials = []
     
     for i in range(num_accounts):
-        print(f"\n📝 Account {i+1} von {num_accounts}")
+        print(f"\n📝 Account {i+1} of {num_accounts}")
         print("-" * 40)
         
         account_name = input(
@@ -1063,7 +1077,7 @@ def main():
             client_secret = input("  Client Secret: ").strip()
         
         if not client_id or not client_secret:
-            print(f"❌ Fehlende Credentials für {account_name}")
+            print(f"❌ Missing credentials for {account_name}")
             return
         
         accounts.append(account_name)
@@ -1072,61 +1086,61 @@ def main():
         )
     
     print("\n" + "=" * 70)
-    print("🔄 Authentifiziere Accounts...")
+    print("🔄 Authenticating accounts...")
     print("=" * 70)
     
     all_activities = []
     
     for creds in account_credentials:
-        print(f"\n👤 Verarbeite {creds['name']}...")
+        print(f"\n👤 Processing {creds['name']}...")
         
         access_token = authenticate_strava(
             creds["client_id"], creds["client_secret"], creds["name"]
         )
         
         if not access_token:
-            print(f"❌ Authentifizierung fehlgeschlagen für {creds['name']}")
+            print(f"❌ Authentication failed for {creds['name']}")
             continue
         
-        print(f"📡 Lade Aktivitäten für {creds['name']}...")
+        print(f"📡 Loading activities for {creds['name']}...")
         activities = get_all_activities(access_token, creds["name"])
         
         if activities:
             all_activities.extend(activities)
-            print(f"✅ {len(activities)} Aktivitäten von {creds['name']}")
+            print(f"✅ {len(activities)} activities from {creds['name']}")
         else:
-            print(f"⚠️  Keine Aktivitäten gefunden für {creds['name']}")
+            print(f"⚠️  No activities found for {creds['name']}")
     
     if not all_activities:
-        print("\n❌ Von keinem Account wurden Aktivitäten geladen (Rate-Limit? Datum zu streng?)")
+        print("\n❌ No activities loaded from any account (rate limit? date too restrictive?)")
         return
     
     print(
-        f"\n✅ Gesamt: {len(all_activities)} Aktivitäten "
-        f"aus {len(accounts)} Accounts"
+        f"\n✅ Total: {len(all_activities)} activities "
+        f"from {len(accounts)} accounts"
     )
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     print("\n" + "=" * 70)
-    print("📍 Erzeuge Combined Routes Map...")
+    print("📍 Creating combined routes map...")
     print("=" * 70)
     routes_file = create_combined_routes_map(all_activities, timestamp, accounts)
     
     print("\n" + "=" * 70)
-    print("🌍 Erzeuge Combined Heatmap...")
+    print("🌍 Creating combined heatmap...")
     print("=" * 70)
     heatmap_file = create_combined_heatmap(all_activities, timestamp, accounts)
     
     print("\n" + "=" * 70)
-    print("🎉 Fertig!")
+    print("🎉 Done!")
     print("=" * 70)
-    print(f"\n📁 Ausgaben:")
+    print(f"\n📁 Output files:")
     print(f"   1. Routes: {routes_file}")
     print(f"   2. Heatmap: {heatmap_file}")
     print(f"   3. Location Maps: location_maps_{timestamp}/")
-    print("\n🌐 Öffne die Heatmap-HTML-Datei in deinem Browser.")
-    print("💡 Jede Person hat ihre eigene Farbe.")
+    print("\n🌐 Open the heatmap HTML file in your browser.")
+    print("💡 Each person has their own color.")
 
 
 if __name__ == "__main__":
@@ -1136,5 +1150,5 @@ if __name__ == "__main__":
         print("\n\n⚠️  Script interrupted (Ctrl+C).")
         sys.exit(0)
     except Exception as e:
-        print(f"\n\n❌ Fehler: {e}")
+        print(f"\n\n❌ Error: {e}")
         sys.exit(1)
